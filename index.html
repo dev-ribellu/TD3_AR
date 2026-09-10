@@ -27,8 +27,7 @@
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
       import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
-      import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
-      import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+      
 
       let reticle, pmremGenerator, current_object, controls, envmap;
 
@@ -51,21 +50,7 @@
         }
       });
 
-      function loadModel(model) {
-        new RGBELoader()
-          .setDataType(THREE.HalfFloatType)
-          .setPath("textures/") // supprimer cette ligne sous Glitch
-          .load("rocky_terrain_4k.gltf", function (texture) {
-            envmap = pmremGenerator.fromEquirectangular(texture).texture;
-            texture.flipY = false;
-            texture.premultiplyAlpha = false;
-            scene.environment = envmap;
-            texture.dispose();
-            pmremGenerator.dispose();
-            render();
-            var loader = new GLTFLoader().setPath("3d/");
-          });
-      }
+      
 
       init();
 
@@ -205,6 +190,21 @@
             }
           }
         }
+		function loadModel(model) {
+        new RGBELoader()
+          .setDataType(THREE.HalfFloatType)
+          .setPath("textures/") // supprimer cette ligne sous Glitch
+          .load("rocky_terrain_4k.gltf", function (texture) {
+            envmap = pmremGenerator.fromEquirectangular(texture).texture;
+            texture.flipY = false;
+            texture.premultiplyAlpha = false;
+            scene.environment = envmap;
+            texture.dispose();
+            pmremGenerator.dispose();
+            render();
+            var loader = new GLTFLoader().setPath("3d/");
+          });
+      }
 
         renderer.render(scene, camera);
       }
