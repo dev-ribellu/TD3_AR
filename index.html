@@ -1,171 +1,236 @@
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<title>three.js ar - hit test</title>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-		<link type="text/css" rel="stylesheet" href="main.css">
-	</head>
-	<body>
+  <head>
+    <title>three.js ar - hit test</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <link type="text/css" rel="stylesheet" href="main.css" />
+  </head>
+  <body>
+    <script type="importmap">
+      {
+      	"imports": {
+      		"three": "./build/three.module.js",
+      		"three/addons/": "./jsm/"
+      	}
+      }
+      	<script type="module">
+       import * as THREE from "three";
+       import { ARButton } from "three/addons/webxr/ARButton.js";
+       import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
 
-		<script type="importmap">
-			{
-				"imports": {
-					"three": "./build/three.module.js",
-					"three/addons/": "./jsm/"
-				}
-			}
-		</script>
+       let container;
+       let camera, scene, renderer;
+       let controller1, controller2;
 
-		<script type="module">
+       let reticle;
 
-			import * as THREE from 'three';
-			import { ARButton } from 'three/addons/webxr/ARButton.js';
+       let hitTestSource = null;
+       let hitTestSourceRequested = false;
 
-			let container;
-			let camera, scene, renderer;
-			let controller1, controller2;
+       // Cannon.js world
+       let world;
+       const objects = [];
 
-			let reticle;
+       init();
 
-			let hitTestSource = null;
-			let hitTestSourceRequested = false;
+       function init() {
+      container = document.createElement("div");
+      document.body.appendChild(container);
 
-			init();
+      scene = new THREE.Scene();
 
-			function init() {
+      camera = new THREE.PerspectiveCamera(
+        70,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        20
+      );
 
-				container = document.createElement( 'div' );
-				document.body.appendChild( container );
+      const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
+      light.position.set(0.5, 1, 0.25);
+      scene.add(light);
 
-				scene = new THREE.Scene();
+      //
 
-				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 20 );
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setAnimationLoop(animate);
+      renderer.xr.enabled = true;
+      container.appendChild(renderer.domElement);
 
-				const light = new THREE.HemisphereLight( 0xffffff, 0xbbbbff, 3 );
-				light.position.set( 0.5, 1, 0.25 );
-				scene.add( light );
+      //
 
-				//
+      document.body.appendChild(
+        ARButton.createButton(renderer, { requiredFeatures: ["hit-test"] })
+      );
 
-				renderer = new THREE.WebGLRenderer( { antialias: true, alpha: true } );
-				renderer.setPixelRatio( window.devicePixelRatio );
-				renderer.setSize( window.innerWidth, window.innerHeight );
-				renderer.setAnimationLoop( animate );
-				renderer.xr.enabled = true;
-				container.appendChild( renderer.domElement );
+      //
 
-				//
+      // Initialize Cannon.js physics world
+      world = new CANNON.World();
+      world.gravity.set(0, -9.82, 0); // Gravity pointing downwards
 
-				document.body.appendChild( ARButton.createButton( renderer, { requiredFeatures: [ 'hit-test' ] } ) );
+      // Create the ground
+      const groundBody = new CANNON.Body({
+        mass: 0, // Static body
+        shape: new CANNON.Plane(),
+      });
+      groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Rotate to be horizontal
+      world.addBody(groundBody);
 
-				//
+      const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x808080 });
+      const groundMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(10, 10),
+        groundMaterial
+      );
+      groundMesh.rotation.x = -Math.PI / 2;
+      scene.add(groundMesh);
 
-				const geometry = new THREE.CylinderGeometry( 0.1, 0.1, 0.2, 32 ).translate( 0, 0.1, 0 );
+      // Create walls
+      const wallMaterial = new CANNON.Material();
+      const walls = [
+        { x: 5, y: 1, z: 0, rotation: [0, Math.PI / 2, 0] }, // Right wall
+        { x: -5, y: 1, z: 0, rotation: [0, -Math.PI / 2, 0] }, // Left wall
+        { x: 0, y: 1, z: 5, rotation: [0, 0, 0] }, // Back wall
+        { x: 0, y: 1, z: -5, rotation: [0, Math.PI, 0] }, // Front wall
+      ];
 
+      walls.forEach((wall) => {
+        const wallBody = new CANNON.Body({
+      	mass: 0,
+      	shape: new CANNON.Plane(),
+      	material: wallMaterial,
+        });
+        wallBody.position.set(wall.x, wall.y, wall.z);
+        wallBody.quaternion.setFromEuler(...wall.rotation);
+        world.addBody(wallBody);
+      });
 
-				function onSelect() {
+      //
 
-					if ( reticle.visible ) {
+      const geometry = new THREE.SphereGeometry(0.1, 32, 32); // Sphere geometry
 
-						const material = new THREE.MeshPhongMaterial( { color: 0xffffff * Math.random() } );
-						const mesh = new THREE.Mesh( geometry, material );
-						reticle.matrix.decompose( mesh.position, mesh.quaternion, mesh.scale );
-						mesh.scale.y = Math.random() * 2 + 1;
-						scene.add( mesh );
+      function onSelect() {
+        if (reticle.visible) {
+      	const material = new THREE.MeshPhongMaterial({
+      	  color: 0xffffff * Math.random(),
+      	});
+      	const mesh = new THREE.Mesh(geometry, material);
+      	reticle.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+      	scene.add(mesh);
 
-					}
+      	// Create a physics body for the sphere
+      	const shape = new CANNON.Sphere(0.1); // Match the Three.js sphere radius
+      	const body = new CANNON.Body({
+      	  mass: 1, // Dynamic body
+      	  position: new CANNON.Vec3(
+      		mesh.position.x,
+      		mesh.position.y,
+      		mesh.position.z
+      	  ),
+      	  shape: shape,
+      	});
 
-				}
+      	// Add some initial velocity for fun
+      	body.velocity.set(
+      	  (Math.random() - 0.5) * 2,
+      	  Math.random() * 2,
+      	  (Math.random() - 0.5) * 2
+      	);
 
-				controller1 = renderer.xr.getController( 0 );
-				controller1.addEventListener( 'select', onSelect );
-				scene.add( controller1 );
+      	world.addBody(body);
 
-				controller2 = renderer.xr.getController( 1 );
-				controller2.addEventListener( 'select', onSelect );
-				scene.add( controller2 );
+      	// Link the Three.js mesh with the Cannon.js body
+      	objects.push({ mesh, body });
+        }
+      }
 
-				reticle = new THREE.Mesh(
-					new THREE.RingGeometry( 0.15, 0.2, 32 ).rotateX( - Math.PI / 2 ),
-					new THREE.MeshBasicMaterial()
-				);
-				reticle.matrixAutoUpdate = false;
-				reticle.visible = false;
-				scene.add( reticle );
+      controller1 = renderer.xr.getController(0);
+      controller1.addEventListener("select", onSelect);
+      scene.add(controller1);
 
-				//
+      controller2 = renderer.xr.getController(1);
+      controller2.addEventListener("select", onSelect);
+      scene.add(controller2);
 
-				window.addEventListener( 'resize', onWindowResize );
+      reticle = new THREE.Mesh(
+        new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial()
+      );
+      reticle.matrixAutoUpdate = false;
+      reticle.visible = false;
+      scene.add(reticle);
 
-			}
+      //
 
-			function onWindowResize() {
+      window.addEventListener("resize", onWindowResize);
+       }
 
-				camera.aspect = window.innerWidth / window.innerHeight;
-				camera.updateProjectionMatrix();
+       function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
 
-				renderer.setSize( window.innerWidth, window.innerHeight );
+      renderer.setSize(window.innerWidth, window.innerHeight);
+       }
 
-			}
+       //
 
-			//
+       function animate(timestamp, frame) {
+      if (frame) {
+        const referenceSpace = renderer.xr.getReferenceSpace();
+        const session = renderer.xr.getSession();
 
-			function animate( timestamp, frame ) {
+        if (hitTestSourceRequested === false) {
+      	session
+      	  .requestReferenceSpace("viewer")
+      	  .then(function (referenceSpace) {
+      		session
+      		  .requestHitTestSource({ space: referenceSpace })
+      		  .then(function (source) {
+      			hitTestSource = source;
+      		  });
+      	  });
 
-				if ( frame ) {
+      	session.addEventListener("end", function () {
+      	  hitTestSourceRequested = false;
+      	  hitTestSource = null;
+      	});
 
-					const referenceSpace = renderer.xr.getReferenceSpace();
-					const session = renderer.xr.getSession();
+      	hitTestSourceRequested = true;
+        }
 
-					if ( hitTestSourceRequested === false ) {
+        if (hitTestSource) {
+      	const hitTestResults = frame.getHitTestResults(hitTestSource);
 
-						session.requestReferenceSpace( 'viewer' ).then( function ( referenceSpace ) {
+      	if (hitTestResults.length) {
+      	  const hit = hitTestResults[0];
 
-							session.requestHitTestSource( { space: referenceSpace } ).then( function ( source ) {
+      	  reticle.visible = true;
+      	  reticle.matrix.fromArray(
+      		hit.getPose(referenceSpace).transform.matrix
+      	  );
+      	} else {
+      	  reticle.visible = false;
+      	}
+        }
+      }
 
-								hitTestSource = source;
+      // Step the physics world
+      world.step(1 / 60);
 
-							} );
+      // Update Three.js meshes to match Cannon.js bodies
+      objects.forEach(({ mesh, body }) => {
+        mesh.position.copy(body.position);
+        mesh.quaternion.copy(body.quaternion);
+      });
 
-						} );
-
-						session.addEventListener( 'end', function () {
-
-							hitTestSourceRequested = false;
-							hitTestSource = null;
-
-						} );
-
-						hitTestSourceRequested = true;
-
-					}
-
-					if ( hitTestSource ) {
-
-						const hitTestResults = frame.getHitTestResults( hitTestSource );
-
-						if ( hitTestResults.length ) {
-
-							const hit = hitTestResults[ 0 ];
-
-							reticle.visible = true;
-							reticle.matrix.fromArray( hit.getPose( referenceSpace ).transform.matrix );
-
-						} else {
-
-							reticle.visible = false;
-
-						}
-
-					}
-
-				}
-
-				renderer.render( scene, camera );
-
-			}
-
-		</script>
-	</body>
+      renderer.render(scene, camera);
+       }
+    </script>
+  </body>
 </html>
