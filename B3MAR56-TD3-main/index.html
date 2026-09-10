@@ -37,6 +37,8 @@
       let world;
       const objects = [];
 
+      let groundMesh, groundBody;
+
       init();
 
       function init() {
@@ -77,7 +79,7 @@
         world = new CANNON.World();
         world.gravity.set(0, -9.82, 0); // Gravity pointing downwards
 
-        const groundBody = new CANNON.Body({
+        groundBody = new CANNON.Body({
           mass: 0, // Static body
           shape: new CANNON.Plane(),
         });
@@ -85,7 +87,7 @@
         world.addBody(groundBody);
 
         const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x808080 });
-        const groundMesh = new THREE.Mesh(
+        groundMesh = new THREE.Mesh(
           new THREE.PlaneGeometry(10, 10),
           groundMaterial
         );
@@ -189,6 +191,16 @@
               reticle.matrix.fromArray(
                 hit.getPose(referenceSpace).transform.matrix
               );
+
+              // Update ground position to match the reticle
+              const position = new THREE.Vector3();
+              reticle.matrix.decompose(
+                position,
+                new THREE.Quaternion(),
+                new THREE.Vector3()
+              );
+              groundMesh.position.copy(position);
+              groundBody.position.set(position.x, position.y, position.z);
             } else {
               reticle.visible = false;
             }
