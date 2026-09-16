@@ -10,7 +10,10 @@
     <link type="text/css" rel="stylesheet" href="main.css" />
   </head>
   <body>
+    <!-- Inclusion de jQuery -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+
+    <!-- Import map pour les modules -->
     <script type="importmap">
       {
         "imports": {
@@ -20,195 +23,353 @@
       }
     </script>
 
+    <!-- Script principal -->
     <script type="module">
-      import * as THREE from "three";
+            // Importation des modules nécessaires
+            import * as THREE from "three";
+            import { ARButton } from "three/addons/webxr/ARButton.js";
+            import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+            import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+            import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 
-      import { ARButton } from "three/addons/webxr/ARButton.js";
-      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
-      
+            // Déclaration des variables globales
+            let container, camera, scene, renderer, pmremGenerator, controls, render, current_url;
+            let reticle, current_object, envmap;
+            let controller1, controller2;
+            let hitTestSource = null;
+            let hitTestSourceRequested = false;
 
-      let reticle, pmremGenerator, current_object, controls, envmap;
+            const InteractionState = {
+              IDLE: "idle",
+              PLACING: "placing",
+              SELECTED: "selected",
+              ROTATING: "rotating"
+            };
 
-      let container;
-      let camera, scene, renderer;
-      let controller1, controller2;
+            let currentState = InteractionState.IDLE;
 
-      let hitTestSource = null;
-      let hitTestSourceRequested = false;
-      let current_url = "";
-      $(".ar-object").click(function () {
-        // update current object url
-        current_url = $(this).attr("id");
-        // load object in scene only when the AR is not started
-        if (!renderer.xr.isPresenting) {
-          if (current_object != null) {
-            scene.remove(current_object);
-          }
-          loadModel(current_url);
-        }
-      });
+            // Initialisation de la scène
+            init();
 
-      
+            $(".ar-object").click(function () {
+            // Supprimer la classe active des autres éléments
+            $(".ar-object").removeClass("active");
 
-      init();
+            // Ajouter la classe active à l'élément cliqué
+            $(this).addClass("active");
 
-      function init() {
-        container = document.createElement("div");
-        document.body.appendChild(container);
+            // Récupérer le chemin du modèle à partir de l'attribut data-model
+            const modelPath = $(this).data("model");
 
-        scene = new THREE.Scene();
+            // Mise à jour de l'URL de l'objet actuel
+            current_url = modelPath;
 
-        camera = new THREE.PerspectiveCamera(
-          70,
-          window.innerWidth / window.innerHeight,
-          0.01,
-          20
-        );
+            // Chargement de l'objet dans la scène uniquement si AR n'est pas activé
+            if (!renderer.xr.isPresenting) {
+              if (current_object != null) {
+                scene.remove(current_object);
+              }
+              loadModel(current_url);
+            }
+          });
 
-        pmremGenerator = new THREE.PMREMGenerator(renderer);
-        pmremGenerator.compileEquirectangularShader();
-
-        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
-        light.position.set(0.5, 1, 0.25);
-        scene.add(light);
-
-		var directionalLight = new THREE.DirectionalLight(0xdddddd, 1);
-		directionalLight.position.set(0, 0, 1).normalize();
-		scene.add(directionalLight);
-		var ambientLight = new THREE.AmbientLight(0x222222);
-		scene.add(ambientLight);
+            
 
 
-        //
 
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setAnimationLoop(animate);
-        renderer.xr.enabled = true;
-        container.appendChild(renderer.domElement);
 
-        //
 
-        document.body.appendChild(
-          ARButton.createButton(renderer, { requiredFeatures: ["hit-test"] })
-        );
+            // Fonction d'initialisation
+            function init() {
+              // Création du conteneur
+              container = document.createElement("div");
+              document.body.appendChild(container);
+            
+              // Création de la scène
+              scene = new THREE.Scene();
+            
+              // Configuration de la caméra
+              camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+            
+              // Ajout des lumières
+              const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
+              light.position.set(0.5, 1, 0.25);
+              scene.add(light);
+            
+              const directionalLight = new THREE.DirectionalLight(0xdddddd, 1);
+              directionalLight.position.set(0, 0, 1).normalize();
+              scene.add(directionalLight);
+            
+              const ambientLight = new THREE.AmbientLight(0x222222);
+              scene.add(ambientLight);
+            
+              // Initialisation du renderer
+              renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+              renderer.setPixelRatio(window.devicePixelRatio);
+              renderer.setSize(window.innerWidth, window.innerHeight);
+              renderer.xr.enabled = true;
+              container.appendChild(renderer.domElement);
+            
+              // Initialisation de pmremGenerator
+              pmremGenerator = new THREE.PMREMGenerator(renderer);
+              pmremGenerator.compileEquirectangularShader();
+            
+              // Ajout du bouton AR
+              document.body.appendChild(
+                ARButton.createButton(renderer, { requiredFeatures: ["hit-test"] })
+              );
+            
+              // Création du reticle pour le placement des objets
+              reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial()
+              );
+              reticle.matrixAutoUpdate = false;
+              reticle.visible = false;
+              scene.add(reticle);
+            
+              // Configuration des contrôleurs
+              controller1 = renderer.xr.getController(0);
+              controller1.addEventListener("select", onSelect);
+              scene.add(controller1);
+            
+              controller2 = renderer.xr.getController(1);
+              controller2.addEventListener("select", onSelect);
+              scene.add(controller2);
+            
+              controls = new OrbitControls(camera, renderer.domElement);
+              controls.addEventListener("change", render);
+              controls.minDistance = 2;
+              controls.maxDistance = 10;
+              controls.target.set(0, 0, -0.2);
+              controls.enableDamping = true;
+              controls.dampingFactor = 0.05;
+            
+              // Gestion de la redimension de la fenêtre
+              window.addEventListener("resize", onWindowResize);
+            
+              // Boucle d'animation
+              renderer.setAnimationLoop(animate);
+            }
+            
+            
+            
 
-        //
+            // Fonction appelée lors de la sélection (placement d'un objet)
+            function onSelect() {
+                if (reticle.visible) {
+                  // Récupérer l'élément sélectionné dans le menu
+                  const selectedModel = $(".ar-object.active").data("model");
+              
+                  if (selectedModel) {
+                    // Charger le modèle sélectionné
+                    const loader = new GLTFLoader();
+                    loader.load(
+                      selectedModel,
+                      (gltf) => {
+                        // Supprimer l'objet précédent s'il existe
+                        if (current_object) {
+                          scene.remove(current_object);
+                        }
+              
+                        // Ajouter le nouvel objet à la scène
+                        current_object = gltf.scene;
+                        reticle.matrix.decompose(current_object.position, current_object.quaternion, current_object.scale);
+                        scene.add(current_object);
+                      },
+                      undefined,
+                      (error) => {
+                        console.error("Erreur lors du chargement du modèle :", error);
+                      }
+                    );
+                  } else {
+                    console.warn("Aucun modèle sélectionné dans le menu.");
+                  }
+                }
+              }
 
-        const geometry = new THREE.CylinderGeometry(
-          0.1,
-          0.1,
-          0.2,
-          32
-        ).translate(0, 0.1, 0);
-
-        function onSelect() {
-          if (reticle.visible) {
-            const material = new THREE.MeshPhongMaterial({
-              color: 0xffffff * Math.random(),
-            });
-            const mesh = new THREE.Mesh(geometry, material);
-            reticle.matrix.decompose(
-              mesh.position,
-              mesh.quaternion,
-              mesh.scale
-            );
-            mesh.scale.y = Math.random() * 2 + 1;
-            scene.add(mesh);
-          }
-        }
-
-        controller1 = renderer.xr.getController(0);
-        controller1.addEventListener("select", onSelect);
-        scene.add(controller1);
-
-        controller2 = renderer.xr.getController(1);
-        controller2.addEventListener("select", onSelect);
-        scene.add(controller2);
-
-        reticle = new THREE.Mesh(
-          new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
-          new THREE.MeshBasicMaterial()
-        );
-        reticle.matrixAutoUpdate = false;
-        reticle.visible = false;
-        scene.add(reticle);
-
-        //
-
-        window.addEventListener("resize", onWindowResize);
-      }
-
-      function onWindowResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      }
-
-      //
-
-      function animate(timestamp, frame) {
-        if (frame) {
-          const referenceSpace = renderer.xr.getReferenceSpace();
-          const session = renderer.xr.getSession();
-
-          if (hitTestSourceRequested === false) {
-            session
-              .requestReferenceSpace("viewer")
-              .then(function (referenceSpace) {
-                session
-                  .requestHitTestSource({ space: referenceSpace })
-                  .then(function (source) {
-                    hitTestSource = source;
+            function loadModel(model){
+              new RGBELoader()
+              .setDataType(THREE.HalfFloatType)
+              .setPath('./assets/') 
+              .load('qwantani_dusk_2_puresky_4k.hdr', function(texture){ 
+                envmap = pmremGenerator.fromEquirectangular(texture).texture;
+                texture.flipY = false; 
+                
+                texture.premultiplyAlpha = false; 
+                
+                scene.environment = envmap;
+                texture.dispose();
+                pmremGenerator.dispose();
+                renderer.render(scene, camera);
+                var loader = new GLTFLoader(); 
+                loader.load(".glb", function(glb) { 
+                  current_object = glb.scene;
+                  scene.add(current_object);
+                  arPlace();
+                  // centrer les objets sur la scène
+                  var box = new THREE.Box3();
+                  box.setFromObject(current_object);
+                  box.center(controls.target);
+                  controls.update();
+                  render();
                   });
               });
+            }
 
-            session.addEventListener("end", function () {
-              hitTestSourceRequested = false;
-              hitTestSource = null;
+
+
+
+            // Fonction appelée lors du redimensionnement de la fenêtre
+            function onWindowResize() {
+              camera.aspect = window.innerWidth / window.innerHeight;
+              camera.updateProjectionMatrix();
+              renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+
+
+            // Fonction d'animation
+            function animate(timestamp, frame) {
+              if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                // Gestion du hit-test
+                if (!hitTestSourceRequested) {
+                  session
+                    .requestReferenceSpace("viewer")
+                    .then((referenceSpace) => {
+                      session
+                        .requestHitTestSource({ space: referenceSpace })
+                        .then((source) => {
+                          hitTestSource = source;
+                        });
+                    });
+
+                  session.addEventListener("end", () => {
+                    hitTestSourceRequested = false;
+                    hitTestSource = null;
+                  });
+
+                  hitTestSourceRequested = true;
+                }
+
+
+
+                // Mise à jour du reticle en fonction des résultats du hit-test
+                if (hitTestSource) {
+                  const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+                  if (hitTestResults.length) {
+                    const hit = hitTestResults[0];
+                    reticle.visible = true;
+                    reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                  } else {
+                    reticle.visible = false;
+                  }
+                }
+              }
+
+              // Rendu de la scène
+              renderer.render(scene, camera);
+            }
+            function findRootObject(intersection) {
+              let object = intersection.object;
+              while (object.parent && object.parent.type !== "Scene") {
+                object = object.parent;
+              }
+              return object;
+            }
+
+                        function selectObject(object) {
+              if (currentState !== InteractionState.IDLE) return;
+            
+              deselectObject(); // Désélectionner l'objet précédent
+              current_object = object;
+              currentState = InteractionState.SELECTED;
+            
+              // Ajouter un feedback visuel (bounding box)
+              const box = new THREE.BoxHelper(current_object, 0xffff00);
+              box.name = "selectionBox";
+              scene.add(box);
+            }
+            
+            function deselectObject() {
+              if (current_object) {
+                // Supprimer le feedback visuel
+                const box = scene.getObjectByName("selectionBox");
+                if (box) scene.remove(box);
+            
+                current_object = null;
+                currentState = InteractionState.IDLE;
+              }
+            }
+
+            let touchStartAngle = 0;
+            
+            function onTouchStart(event) {
+              if (currentState !== InteractionState.SELECTED || event.touches.length !== 2) return;
+            
+              const touch1 = event.touches[0];
+              const touch2 = event.touches[1];
+              touchStartAngle = Math.atan2(
+                touch2.clientY - touch1.clientY,
+                touch2.clientX - touch1.clientX
+              );
+            }
+            
+            function onTouchMove(event) {
+              if (currentState !== InteractionState.SELECTED || event.touches.length !== 2) return;
+            
+              const touch1 = event.touches[0];
+              const touch2 = event.touches[1];
+              const currentAngle = Math.atan2(
+                touch2.clientY - touch1.clientY,
+                touch2.clientX - touch1.clientX
+              );
+            
+              const deltaAngle = currentAngle - touchStartAngle;
+              rotateObject(0, deltaAngle, 0); // Rotation autour de l'axe Y
+              touchStartAngle = currentAngle;
+            }
+            
+            function onTouchEnd(event) {
+              if (event.touches.length < 2) {
+                currentState = InteractionState.SELECTED;
+              }
+            }
+            
+            document.addEventListener("touchstart", onTouchStart);
+            document.addEventListener("touchmove", onTouchMove);
+            document.addEventListener("touchend", onTouchEnd);
+
+
+            controller1.addEventListener("selectstart", () => {
+              if (currentState === InteractionState.IDLE && current_object) {
+                selectObject(current_object);
+              } else if (currentState === InteractionState.SELECTED) {
+                currentState = InteractionState.ROTATING;
+              }
+            });
+            
+            controller1.addEventListener("selectend", () => {
+              if (currentState === InteractionState.ROTATING) {
+                currentState = InteractionState.SELECTED;
+              }
             });
 
-            hitTestSourceRequested = true;
-          }
 
-          if (hitTestSource) {
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
-
-            if (hitTestResults.length) {
-              const hit = hitTestResults[0];
-
-              reticle.visible = true;
-              reticle.matrix.fromArray(
-                hit.getPose(referenceSpace).transform.matrix
-              );
-            } else {
-              reticle.visible = false;
+            function rotateObject(deltaX, deltaY, deltaZ) {
+              if (!current_object) return;
+            
+              current_object.rotation.x += deltaX;
+              current_object.rotation.y += deltaY;
+              current_object.rotation.z += deltaZ;
             }
-          }
-        }
-		function loadModel(model) {
-        new RGBELoader()
-          .setDataType(THREE.HalfFloatType)
-          .setPath("textures/") // supprimer cette ligne sous Glitch
-          .load("rocky_terrain_4k.gltf", function (texture) {
-            envmap = pmremGenerator.fromEquirectangular(texture).texture;
-            texture.flipY = false;
-            texture.premultiplyAlpha = false;
-            scene.environment = envmap;
-            texture.dispose();
-            pmremGenerator.dispose();
-            render();
-            var loader = new GLTFLoader().setPath("3d/");
-          });
-      }
 
-        renderer.render(scene, camera);
-      }
     </script>
+
     <script>
       function openNav() {
         document.getElementById("mySidenav").style.width = "250px";
@@ -223,10 +384,10 @@
         <a href="javascript:void(0)" class="closebtn" onclick="closeNav()"
           >&times;</a
         >
-        <a class="ar-object" id="1" href="#">item_1</a>
-        <a class="ar-object" id="2" href="#">item_2</a>
-        <a class="ar-object" id="3" href="#">item_3</a>
-        <a class="ar-object" id="4" href="#">item_4</a>
+        <a class="ar-object" id="1" data-model="./assets/chair.glb" href="#">item_1</a>
+        <a class="ar-object" id="2" data-model="./assets/chair2.glb" href="#">item_2</a>
+        <a class="ar-object" id="3" data-model="./assets/chair3.glb" href="#">item_3</a>
+        <a class="ar-object" id="4" data-model="./assets/chair4.glb" href="#">item_4</a>
       </div>
       <div id="container" style="position: fixed"></div>
       <span
