@@ -45,6 +45,10 @@
             let hitTestSource = null;
             let hitTestSourceRequested = false;
 
+            // Variables pour le Raycaster
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
             const InteractionState = {
               IDLE: "idle",
               PLACING: "placing",
@@ -163,35 +167,36 @@
 
             // Fonction appelée lors de la sélection (placement d'un objet)
             function onSelect() {
-                if (reticle.visible) {
-                  // Récupérer l'élément sélectionné dans le menu
-                  const selectedModel = $(".ar-object.active").data("model");
               
-                  if (selectedModel) {
-                    // Charger le modèle sélectionné
-                    const loader = new GLTFLoader();
-                    loader.load(
-                      selectedModel,
-                      (gltf) => {
-                        // Supprimer l'objet précédent s'il existe
-                        if (current_object) {
-                          scene.remove(current_object);
-                        }
-              
-                        // Ajouter le nouvel objet à la scène
-                        current_object = gltf.scene;
-                        reticle.matrix.decompose(current_object.position, current_object.quaternion, current_object.scale);
-                        scene.add(current_object);
-                      },
-                      undefined,
-                      (error) => {
-                        console.error("Erreur lors du chargement du modèle :", error);
+              if (reticle.visible) {
+                // Récupérer l'élément sélectionné dans le menu
+                const selectedModel = $(".ar-object.active").data("model");
+            
+                if (selectedModel) {
+                  // Charger le modèle sélectionné
+                  const loader = new GLTFLoader();
+                  loader.load(
+                    selectedModel,
+                    (gltf) => {
+                      // Supprimer l'objet précédent s'il existe
+                      if (current_object) {
+                        scene.remove(current_object);
                       }
-                    );
-                  } else {
-                    console.warn("Aucun modèle sélectionné dans le menu.");
-                  }
+            
+                      // Ajouter le nouvel objet à la scène
+                      current_object = gltf.scene;
+                      reticle.matrix.decompose(current_object.position, current_object.quaternion, current_object.scale);
+                      scene.add(current_object);
+                    },
+                    undefined,
+                    (error) => {
+                      console.error("Erreur lors du chargement du modèle :", error);
+                    }
+                  );
+                } else {
+                  console.warn("Aucun modèle sélectionné dans le menu.");
                 }
+              }
               }
 
             function loadModel(model){
@@ -288,10 +293,13 @@
               return object;
             }
 
-                        function selectObject(object) {
+            function selectObject(object) {
               if (currentState !== InteractionState.IDLE) return;
             
-              deselectObject(); // Désélectionner l'objet précédent
+              // Désélectionner l'objet précédent
+              deselectObject();
+            
+              // Sélectionner le nouvel objet
               current_object = object;
               currentState = InteractionState.SELECTED;
             
@@ -300,6 +308,28 @@
               box.name = "selectionBox";
               scene.add(box);
             }
+            document.addEventListener("click", (event) => {
+              if (currentState === InteractionState.SELECTED) {
+                deselectObject();
+              }
+              if (currentState !== InteractionState.IDLE) return;
+
+                // Convertir les coordonnées de la souris en coordonnées normalisées (-1 à 1)
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                // Effectuer un Raycast
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(scene.children, true);
+
+                // Si un objet est cliqué
+                if (intersects.length > 0) {
+                  const intersectedObject = findRootObject(intersects[0]);
+                  if (intersectedObject) {
+                    selectObject(intersectedObject);
+                  }
+                }
+            });
             
             function deselectObject() {
               if (current_object) {
@@ -350,25 +380,57 @@
             document.addEventListener("touchmove", onTouchMove);
             document.addEventListener("touchend", onTouchEnd);
 
+            let isDragging = false;
+
+            document.addEventListener("mousedown", (event) => {
+              if (currentState === InteractionState.SELECTED && event.button === 0) {
+                isDragging = true;
+              }
+            });
+
+            document.addEventListener("mousemove", (event) => {
+              if (isDragging) {
+                const deltaX = event.movementX * 0.01; // Ajustez le facteur selon vos besoins
+                const deltaY = event.movementY * 0.01;
+                rotateObject(deltaY, deltaX, 0); // Rotation autour de l'axe Y
+              }
+            });
+
+            document.addEventListener("mouseup", () => {
+              isDragging = false;
+            });
+
+
+            let previousControllerPosition = new THREE.Vector3();
 
             controller1.addEventListener("selectstart", () => {
               if (currentState === InteractionState.IDLE && current_object) {
                 selectObject(current_object);
               } else if (currentState === InteractionState.SELECTED) {
                 currentState = InteractionState.ROTATING;
+                previousControllerPosition.copy(controller1.position);
               }
             });
-            
+
             controller1.addEventListener("selectend", () => {
               if (currentState === InteractionState.ROTATING) {
                 currentState = InteractionState.SELECTED;
               }
             });
 
+            controller1.addEventListener("squeezemove", () => {
+              if (currentState === InteractionState.ROTATING) {
+                const currentControllerPosition = controller1.position.clone();
+                const delta = currentControllerPosition.sub(previousControllerPosition);
+                rotateObject(0, delta.x * 0.1, 0); // Ajustez le facteur selon vos besoins
+                previousControllerPosition.copy(currentControllerPosition);
+              }
+            });
+
 
             function rotateObject(deltaX, deltaY, deltaZ) {
               if (!current_object) return;
-            
+
               current_object.rotation.x += deltaX;
               current_object.rotation.y += deltaY;
               current_object.rotation.z += deltaZ;
